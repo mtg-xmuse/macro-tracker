@@ -164,6 +164,14 @@
     };
     var state={version:1,targets:{calories:null,protein:null,carbs:null,fat:null},foods:[],bodyWeights:{},checks:{},exerciseWeights:{}};
     var selectedDate=todayKey(),activeProfile="you",activeRoutine="upper-a",photoUrl=null,stream=null,scanLoop=0,zxingReader=null;
+
+var _memKey="macroTrackerShared.v1";
+function persistNow(){try{localStorage.setItem(_memKey,JSON.stringify({v:1,savedAt:Date.now(),state:state,ui:{selectedDate:selectedDate,activeProfile:activeProfile,activeRoutine:activeRoutine}}))}catch(e){}}
+try{var _saved=JSON.parse(localStorage.getItem(_memKey)||"null");if(_saved&&_saved.v===1&&_saved.state&&_saved.state.version===1){state=_saved.state;if(_saved.ui){if(_saved.ui.selectedDate)selectedDate=_saved.ui.selectedDate;if(_saved.ui.activeProfile)activeProfile=_saved.ui.activeProfile;if(_saved.ui.activeRoutine)activeRoutine=_saved.ui.activeRoutine}}}catch(e){}
+setInterval(persistNow,2500);
+document.addEventListener("visibilitychange",function(){if(document.visibilityState==="hidden")persistNow()});
+window.addEventListener("pagehide",persistNow);
+
     function $(id){return document.getElementById(id)}
     function todayKey(){var d=new Date();return [d.getFullYear(),String(d.getMonth()+1).padStart(2,"0"),String(d.getDate()).padStart(2,"0")].join("-")}
     function shiftDate(key,n){var d=new Date(key+"T12:00:00");d.setDate(d.getDate()+n);return [d.getFullYear(),String(d.getMonth()+1).padStart(2,"0"),String(d.getDate()).padStart(2,"0")].join("-")}
