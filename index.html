@@ -85,7 +85,7 @@
             <button class="capture-card photo" id="foodPhotoButton"><svg width="25" height="25" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 11h16M6 11a6 6 0 0 1 12 0M3 11v2h18v-2M5 13l1 7h12l1-7M12 5V3"/></svg><span><b>Add food photo</b><small>Keep a visual reference</small></span></button>
           </div>
           <button class="text-action" id="manualButton"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg> Add food manually</button>
-          <input id="foodPhotoInput" type="file" accept="image/*" capture="environment" hidden />
+          <input id="foodPhotoInput" type="file" accept="image/*" hidden />
         </section>
         <section class="section" aria-labelledby="foodLogTitle">
           <div class="section-head"><h2 id="foodLogTitle">Food log</h2><span id="foodCount">0 items</span></div>
@@ -233,7 +233,39 @@ function useBarcode(raw){var code=String(raw||"").replace(/\D/g,"");if(code.leng
     $("prevDay").onclick=function(){selectedDate=shiftDate(selectedDate,-1);render()};$("nextDay").onclick=function(){selectedDate=shiftDate(selectedDate,1);render()};$("todayButton").onclick=function(){selectedDate=todayKey();render()};
     $("foodTab").onclick=function(){$("foodTab").classList.add("active");$("foodTab").setAttribute("aria-current","page");$("workoutTab").classList.remove("active");$("workoutTab").removeAttribute("aria-current");$("foodView").classList.remove("hidden");$("workoutView").classList.add("hidden")};
     $("workoutTab").onclick=function(){$("workoutTab").classList.add("active");$("workoutTab").setAttribute("aria-current","page");$("foodTab").classList.remove("active");$("foodTab").removeAttribute("aria-current");$("workoutView").classList.remove("hidden");$("foodView").classList.add("hidden");renderWorkout()};
-    $("targetsButton").onclick=openTargets;$("manualButton").onclick=function(){openFoodForm({})};$("scanButton").onclick=openScanner;$("foodPhotoButton").onclick=function(){$("foodPhotoInput").click()};$("foodPhotoInput").onchange=function(){var f=this.files&&this.files[0];this.value="";if(f&&(!f.type||f.type.indexOf("image/")===0))openFoodForm({photoUrl:URL.createObjectURL(f)});else if(f)toast("Choose an image file")};
+    $("targetsButton").onclick=openTargets;$("manualButton").onclick=function(){openFoodForm({})};$("scanButton").onclick=openScanner;
+function downscaleImage(file){return new Promise(function(res,rej){var img=new Image();var u=URL.createObjectURL(file);img.onload=function(){URL.revokeObjectURL(u);try{var m=1024,s=Math.min(1,m/Math.max(img.width,img.height));var c=document.createElement("canvas");c.width=Math.max(1,Math.round(img.width*s));c.height=Math.max(1,Math.round(img.height*s));c.getContext("2d").drawImage(img,0,0,c.width,c.height);res(c.toDataURL("image/jpeg",0.85))}catch(e){rej(e)}};img.onerror=function(){URL.revokeObjectURL(u);rej(new Error("img"))};img.src=u})}
+async function estimatePhoto(file){
+  var url=URL.createObjectURL(file);
+  openFoodForm({photoUrl:url});
+  var nameEl=$("foodName"),
+      helpers=document.querySelectorAll("#modalRoot p.helper"),
+      helper=helpers.length?helpers[helpers.length-1]:null;
+  try{
+    if(nameEl)nameEl.placeholder="Analyzing photo\u2026";
+    if(helper)helper.textContent="Analyzing the photo \u2014 this takes a few seconds.";
+    var dataUrl=await downscaleImage(file);
+    var r=await fetch("/api/estimate",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({image:dataUrl})});
+    if(!r.ok)throw new Error(r.status===404?"noapi":"http"+r.status);
+    var d=await r.json();
+    if(d.error)throw new Error(d.error);
+    var rd=function(v){return Math.round(v*10)/10};
+    var set=function(id,v){var el=$(id);if(el&&v!=null&&isFinite(Number(v)))el.value=v};
+    if(nameEl){nameEl.value=String(d.name||"").slice(0,160);nameEl.placeholder="What did you eat?"}
+    set("foodCalories",rd(d.calories));set("foodProtein",rd(d.protein_g));
+    set("foodCarbs",rd(d.carbs_g));set("foodFat",rd(d.fat_g));
+    var sl=$("servingLabel");if(sl&&d.serving)sl.value=String(d.serving).slice(0,80);
+    var sv=$("servings");if(sv)sv.value="1";
+    if(helper)helper.textContent="Estimate from the photo ("+String(d.confidence||"medium")+" confidence) \u2014 please check and adjust as needed.";
+    toast("Photo analyzed \u2014 values filled in.");
+  }catch(e){
+    if(nameEl)nameEl.placeholder="What did you eat?";
+    if(helper)helper.textContent="Photo attached as a reference. Enter your own nutrition estimate below.";
+    if(e&&e.message&&e.message!=="noapi")toast("Couldn't analyze the photo \u2014 enter your estimate manually.");
+  }
+}
+
+$("foodPhotoButton").onclick=function(){$("foodPhotoInput").click()};$("foodPhotoInput").onchange=function(){var f=this.files&&this.files[0];this.value="";if(f&&(!f.type||f.type.indexOf("image/")===0))estimatePhoto(f);else if(f)toast("Choose an image file")};
     $("exportButton").onclick=exportData;$("downloadAppButton").onclick=downloadApp;$("importButton").onclick=function(){$("importInput").click()};$("importInput").onchange=function(){importData(this.files&&this.files[0]);this.value=""};
     $("routineSelect").innerHTML=plans.map(function(p){return '<option value="'+p.id+'">'+p.day+' · '+p.label+'</option>'}).join('');$("routineSelect").onchange=function(){activeRoutine=this.value;renderWorkout()};
     document.querySelectorAll("[data-profile]").forEach(function(b){b.onclick=function(){activeProfile=b.dataset.profile;document.querySelectorAll("[data-profile]").forEach(function(x){var on=x===b;x.classList.toggle("active",on);x.setAttribute("aria-selected",String(on))});renderWorkout()}});
