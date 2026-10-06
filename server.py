@@ -1,8 +1,12 @@
 """Macro Tracker backend for Render.
 
 Serves the static frontend (index.html) and provides a server-side
-photo -> nutrition estimate endpoint. The OpenAI API key lives only here
-as the OPENAI_API_KEY environment variable -- it is never sent to the browser.
+photo -> nutrition estimate endpoint. The Gemini API key lives only here
+as the GEMINI_API_KEY environment variable -- it is never sent to the browser.
+
+Uses the Gemini API free tier (no billing, no card; get a key at
+https://aistudio.google.com) via Google's OpenAI-compatible chat-completions
+endpoint. Free-tier Flash models accept image input at no charge.
 
 Endpoints:
   GET  /                  -> the app
@@ -14,13 +18,15 @@ import base64
 import io
 import json
 import os
+import re
 
 import requests
 from flask import Flask, jsonify, request, send_from_directory
 from PIL import Image
 
 BASE = os.path.dirname(os.path.abspath(__file__))
-OPENAI_MODEL = os.environ.get("OPENAI_MODEL", "gpt-4o-mini")
+GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-2.5-flash")
+GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions"
 
 app = Flask(__name__)
 
@@ -35,9 +41,21 @@ def healthz():
     return jsonify(ok=True)
 
 
+def _extract_json(text):
+    """Pull a JSON object out of model output, tolerating code fences."""
+    text = text.strip()
+    text = re.sub(r"^```(?:json)?\s*", "", text)
+    text = re.sub(r"\s*```$", "", text)
+    start = text.find("{")
+    end = text.rfind("}")
+    if start == -1 or end == -1 or end <= start:
+        raise ValueError("no JSON object found")
+    return json.loads(text[start:end + 1])
+
+
 @app.route("/api/estimate", methods=["POST"])
 def estimate():
-    key = os.environ.get("OPENAI_API_KEY")
+    key = os.environ.get("GEMINI_API_KEY")
     if not key:
         return jsonify(error="AI key not configured on server"), 503
 
@@ -65,10 +83,10 @@ def estimate():
     )
     try:
         resp = requests.post(
-            "https://api.openai.com/v1/chat/completions",
+            GEMINI_URL,
             headers={"Authorization": "Bearer " + key},
             json={
-                "model": OPENAI_MODEL,
+                "model": GEMINI_MODEL,
                 "messages": [{
                     "role": "user",
                     "content": [
@@ -77,19 +95,20 @@ def estimate():
                     ],
                 }],
                 "max_tokens": 300,
-                "response_format": {"type": "json_object"},
             },
             timeout=90,
         )
     except Exception:
         return jsonify(error="AI service unreachable"), 502
 
+    if resp.status_code == 429:
+        return jsonify(error="AI quota exhausted, try again in a minute"), 502
     if resp.status_code != 200:
         return jsonify(error="AI service error"), 502
 
     try:
         content = resp.json()["choices"][0]["message"]["content"]
-        result = json.loads(content)
+        result = _extract_json(content)
     except Exception:
         return jsonify(error="AI response unreadable"), 502
 
